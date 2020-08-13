@@ -36,15 +36,19 @@ class SGAN():
         self.num_classes = 10
         self.latent_shape = np.ones(100)
         
-        self.generator_hype = {'lr':0.0002, 'momentum':0}
-        self.discriminator_hype = {'lr':0.0002, 'momentum':0}
-        self.classifier_hype = {'lr':0.0002, 'momentum':0}
+        self.generator_hype = {'lr':0.00001, 'momentum':0}
+        self.discriminator_hype = {'lr':0.00001, 'momentum':0}
+        self.classifier_hype = {'lr':0.00001, 'momentum':0}
         
         self.dataset_hype = {'val_size':0.3}
         self.dataset_schema = {'Rice':0, 'SugarCane':1, 'BananaTree':2, 'GreenOnion':3}
         self.x = []  # Labeled Data
         self.y_hot = [] # Label onehot-encoded
         self.x_unlabeled = [] # Unlabeled Data
+        
+        self.D_loss_list = []
+        self.G_loss_list = []
+        self.C_loss_list = []
 
     
     def noise_sample(self, num_samples):
@@ -226,13 +230,13 @@ class SGAN():
             print("  Input shape : {}".format(input_tensor.shape))
             
             # 14*14*256
-            L1_1 = Dense(14*14*256)(input_tensor)
+            L1_1 = Dense(14*14*8)(input_tensor)
             L1_2 = BatchNormalization(map_rank=1)(L1_1)
             L1_3 = self.leaky_relu(L1_2)
-            L1_4 = C.reshape(L1_3, (256, 14, 14))
+            L1_4 = C.reshape(L1_3, (8, 14, 14))
             
             # 27*27*128
-            L2_1 = ConvolutionTranspose2D((3,3), 128, strides=2, pad=True)(L1_4)
+            L2_1 = ConvolutionTranspose2D((3,3), 64, strides=2, pad=True)(L1_4)
             L2_2 = BatchNormalization(map_rank=1)(L2_1)
             L2_3 = self.leaky_relu(L2_2)
             
@@ -249,7 +253,7 @@ class SGAN():
             print("  *****************************************")
             print("  Input shape : {}".format(input_tensor.shape))
 
-            L1_1 = Convolution2D((3,3), 128, strides=1, pad=True)(input_tensor)
+            L1_1 = Convolution2D((3,3), 64, strides=1, pad=True)(input_tensor)
             L1_2 = BatchNormalization(map_rank=1)(L1_1)
             L1_3 = self.leaky_relu(L1_2)
             
@@ -294,8 +298,8 @@ class SGAN():
         )
         
         # Compile the loss function(Wasserstein GAN loss function)
-        G_loss = -d_fake
-        D_loss = -d_real + d_fake
+        G_loss = 1.0 - C.log(d_fake)
+        D_loss = -(C.log(d_real) + C.log(1.0 - d_fake))
         C_loss = C.cross_entropy_with_softmax(c_model, c_out_tensor)
         
         # Learner
@@ -382,13 +386,16 @@ class SGAN():
         
         # Start training
         for e in range(0, epoch):
-            
+            c_total_loss = 0
+            d_total_loss = 0
+            g_total_loss = 0
             for s in range(0, step_per_epoch_su):
                 # Update classifier
                 X_data = self.reader_supervised_train.next_minibatch(batch_size, input_map_C)
                 batch_inputs = {x_d_real: X_data[x_d_real].data, c_out_tensor: X_data[c_out_tensor].data}
                 C_Trainer.train_minibatch(batch_inputs)
-                
+                c_total_loss += C_Trainer.previous_minibatch_loss_average
+    
             for s in range(0, step_per_epoch_un):
                 # Update discriminator
                 for dk in range(k):
@@ -397,13 +404,37 @@ class SGAN():
                     if X_data[x_d_real].num_samples == Z_data.shape[0]:
                         batch_inputs = {x_d_real: X_data[x_d_real].data, latent: Z_data}
                         D_Trainer.train_minibatch(batch_inputs)
+                        d_total_loss += D_Trainer.previous_minibatch_loss_average
                 # Update generator
                 Z_data = self.noise_sample(2 * batch_size)
                 batch_inputs = {latent: Z_data}
                 G_Trainer.train_minibatch(batch_inputs)
-            print(" Epoch {} | D_loss:{} G_loss:{} C_loss:{}".format(e, D_trainer.previous_minibatch_loss_average, G_Trainer.previous_minibatch_loss_average, C_Trainer.previous_minibatch_loss_average))
+                g_total_loss += G_Trainer.previous_minibatch_loss_average
+                
+            self.D_loss_list.append(d_total_loss/step_per_epoch_un)
+            self.G_loss_list.append(g_total_loss/step_per_epoch_un)
+            self.C_loss_list.append(c_total_loss/step_per_epoch_su)
+            print(" Epoch {} | D_loss:{} G_loss:{} C_loss:{}".format(e, d_total_loss/step_per_epoch_un, g_total_loss/step_per_epoch_un, c_total_loss/step_per_epoch_su))
+            print(d_total_loss)
             
-
+    def plot_classifier_results(self):
+        plt.figure("Classifier Loss")
+        mpl.style.use('seaborn')
+        epo_list = [i for i in range(len(self.C_loss_list))]
+        plt.plot(epo_list, self.C_loss_list, color = 'red', label='C_model Loss')
+        plt.legend()
+        plt.savefig('ClassifierLoss_{}'.format(len(epo_list)))
+        plt.show()
+    
+    def plot_gan_results(self):
+        plt.figure("GAN Loss")
+        mpl.style.use('seaborn')
+        epo_list = [i for i in range(len(self.D_loss_list))]
+        plt.plot(epo_list, self.D_loss_list, color = 'green', label='D_model Loss')
+        plt.plot(epo_list, self.G_loss_list, color = 'blue', label='G_model Loss')
+        plt.legend()
+        plt.savefig('GANLoss_{}'.format(len(epo_list)))
+        plt.show()
                     
                 
 
