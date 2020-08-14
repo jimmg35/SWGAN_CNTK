@@ -301,6 +301,10 @@ class SGAN():
         G_loss = 1.0 - C.log(d_fake)
         D_loss = -(C.log(d_real) + C.log(1.0 - d_fake))
         C_loss = C.cross_entropy_with_softmax(c_model, c_out_tensor)
+        #G_loss = -d_fake
+        #D_loss = -d_real + d_fake
+        #C_loss = C.cross_entropy_with_softmax(c_model, c_out_tensor)
+        
         
         # Learner
         G_learner = C.adam(
@@ -415,7 +419,6 @@ class SGAN():
             self.G_loss_list.append(g_total_loss/step_per_epoch_un)
             self.C_loss_list.append(c_total_loss/step_per_epoch_su)
             print(" Epoch {} | D_loss:{} G_loss:{} C_loss:{}".format(e, d_total_loss/step_per_epoch_un, g_total_loss/step_per_epoch_un, c_total_loss/step_per_epoch_su))
-            print(d_total_loss)
             
     def plot_classifier_results(self):
         plt.figure("Classifier Loss")
